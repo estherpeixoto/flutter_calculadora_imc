@@ -1,8 +1,10 @@
-import 'package:imc/models/pessoa.dart';
-import 'package:imc/repositories/imc_repository.dart';
 import 'package:flutter/material.dart';
-import 'package:imc/services/calculadora_imc.dart';
+import 'package:imc/models/imc_sqflite_model.dart';
+import 'package:imc/pages/settings_page.dart';
+import 'package:imc/repositories/sqflite/imc_sqflite_repository.dart';
+import 'package:imc/services/calculator.dart';
 import 'package:imc/utils/input_utils.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class MyHomePage extends StatefulWidget {
   final String appName;
@@ -14,12 +16,11 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> {
-  final _formKey = GlobalKey<FormState>();
+  var imcSQFliteRepository = ImcSQFliteRepository();
+  var _imc = const <ImcSQFliteModel>[];
 
-  var imcRepository = ImcRepository();
-  var _imc = const <Pessoa>[];
-  var pesoController = TextEditingController();
-  var alturaController = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
+  var weightController = TextEditingController();
 
   @override
   void initState() {
@@ -28,9 +29,28 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   void getImcList() async {
-    _imc = await imcRepository.list();
-
+    _imc = await imcSQFliteRepository.selectAll();
     setState(() {});
+  }
+
+  void handleFormSubmit() async {
+    if (_formKey.currentState!.validate()) {
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      final double height = prefs.getDouble('height') ?? 0.0;
+
+      await imcSQFliteRepository.insert(ImcSQFliteModel(
+          0,
+          InputUtils.stringToDouble(height.toStringAsFixed(2)),
+          InputUtils.stringToDouble(weightController.text)));
+
+      if (context.mounted) {
+        Navigator.pop(context);
+      }
+
+      getImcList();
+
+      setState(() {});
+    }
   }
 
   @override
@@ -38,72 +58,59 @@ class _MyHomePageState extends State<MyHomePage> {
     return Scaffold(
         appBar: AppBar(
           title: Text(widget.appName),
-          backgroundColor: Colors.deepPurpleAccent.withOpacity(0.3)
+          backgroundColor: Colors.deepPurpleAccent.withOpacity(0.3),
+          actions: [
+            IconButton(
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (context) => const SettingsPage(),
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.settings)),
+          ],
         ),
         floatingActionButton: FloatingActionButton(
           child: const Icon(Icons.add),
           onPressed: () {
-            pesoController.text = "";
-            alturaController.text = "";
+            weightController.text = '';
 
             showDialog(
                 context: context,
                 builder: (BuildContext bc) {
                   return AlertDialog(
-                    title: const Text("Add pessoa"),
+                    title: const Text('Add new weight'),
                     content: Form(
                       key: _formKey,
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           TextFormField(
-                            controller: pesoController,
-                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            controller: weightController,
+                            keyboardType: const TextInputType.numberWithOptions(
+                                decimal: true),
                             decoration: const InputDecoration(
-                              labelText: 'Peso (kg)',
+                              labelText: 'Weight (kg)',
                             ),
                             validator: (value) {
                               try {
                                 if (value == null || value.isEmpty) {
-                                  return 'Preencha';
+                                  return 'Fill';
                                 }
 
                                 double peso = InputUtils.stringToDouble(value);
 
                                 if (peso <= 0) {
-                                  return 'Peso inválido';
+                                  return 'Invalid weight';
                                 }
                               } catch (e) {
-                                return 'Formato inválido';
+                                return 'Invalid format';
                               }
 
                               return null;
                             },
                           ),
-                          TextFormField(
-                            controller: alturaController,
-                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                            decoration: const InputDecoration(
-                              labelText: 'Altura (metros)',
-                            ),
-                            validator: (value) {
-                              try {
-                                if (value == null || value.isEmpty) {
-                                  return 'Preencha';
-                                }
-
-                                double altura = InputUtils.stringToDouble(value);
-
-                                if (altura <= 0) {
-                                  return 'Altura inválida';
-                                }
-                              } catch (e) {
-                                return 'Formato inválido';
-                              }
-
-                              return null;
-                            },
-                          )
                         ],
                       ),
                     ),
@@ -112,49 +119,40 @@ class _MyHomePageState extends State<MyHomePage> {
                           onPressed: () {
                             Navigator.pop(context);
                           },
-                          child: const Text("Cancel")),
+                          child: const Text('Cancel')),
                       TextButton(
-                          onPressed: () async {
-                            if (_formKey.currentState!.validate()) {
-                              await imcRepository.add(
-                                  Pessoa(
-                                      InputUtils.stringToDouble(pesoController.text),
-                                      InputUtils.stringToDouble(alturaController.text)
-                                  )
-                              );
-
-                              if (context.mounted) {
-                                Navigator.pop(context);
-                              }
-
-                              setState(() {});
-                            }
-                          },
-                          child: const Text("Save"))
+                          onPressed: handleFormSubmit,
+                          child: const Text('Save'))
                     ],
                   );
                 });
           },
         ),
         body: Container(
-          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          margin: const EdgeInsets.all(16),
           child: Column(
             children: [
               Expanded(
                 child: ListView.builder(
                     itemCount: _imc.length,
                     itemBuilder: (BuildContext bc, int index) {
-                      var pessoa = _imc[index];
-                      var calculadora = CalculadoraImc();
+                      var imc = _imc[index];
+                      var calculator = Calculator();
                       return Dismissible(
                         onDismissed: (DismissDirection dismissDirection) async {
-                          await imcRepository.remove(pessoa.id);
+                          await imcSQFliteRepository.delete(imc.id);
                           getImcList();
                         },
-                        key: Key(pessoa.id),
+                        key: Key(imc.id.toString()),
                         child: ListTile(
-                          title: Text(calculadora.resultado(pessoa)),
-                          subtitle: Text("Peso: ${pessoa.getPeso()}\nAltura: ${pessoa.getAltura()}"),
+                          title: Text(calculator.result(imc)),
+                          subtitle: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Weight: ${imc.weight} kg'),
+                              Text('Height: ${imc.height} m'),
+                            ],
+                          ),
                         ),
                       );
                     }),

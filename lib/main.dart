@@ -1,7 +1,6 @@
-import 'package:imc/my_app.dart';
 import 'package:flutter/material.dart';
+import 'package:imc/my_app.dart';
 
-void main() {
+void main() async {
   runApp(const MyApp());
 }
-
